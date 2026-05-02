@@ -1,18 +1,51 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import Home from './pages/Home.jsx';
 import Chat from './pages/Chat.jsx';
 
-export default function App() {
-  const [page, setPage] = useState('home');
-  const [userId] = useState(() => {
-    const stored = localStorage.getItem('voiceai_userid');
-    if (stored) return stored;
-    const id = `user_${Date.now()}`;
-    localStorage.setItem('voiceai_userid', id);
-    return id;
-  });
+// Safe userId hook
+function useUserId() {
+  const [userId, setUserId] = useState(null);
 
-  return page === 'home'
-    ? <Home onStart={() => setPage('chat')} />
-    : <Chat userId={userId} onBack={() => setPage('home')} />;
+  useEffect(() => {
+    let stored = localStorage.getItem('voiceai_userid');
+
+    if (!stored) {
+      stored = `user_${Date.now()}`;
+      localStorage.setItem('voiceai_userid', stored);
+    }
+
+    setUserId(stored);
+  }, []);
+
+  return userId;
+}
+
+// Wrapper to use navigation
+function AppRoutes() {
+  const navigate = useNavigate();
+  const userId = useUserId();
+
+  if (!userId) return null; // prevent render flicker
+
+  return (
+    <Routes>
+      <Route
+        path="/"
+        element={<Home onStart={() => navigate('/chat')} />}
+      />
+      <Route
+        path="/chat"
+        element={<Chat userId={userId} onBack={() => navigate('/')} />}
+      />
+    </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppRoutes />
+    </BrowserRouter>
+  );
 }
