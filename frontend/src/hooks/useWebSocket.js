@@ -1,11 +1,15 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+const RECONNECT_DELAY = 3000;
 
 export function useWebSocket(userId) {
   const wsRef = useRef(null);
-  const [status, setStatus] = useState('disconnected'); // disconnected | connecting | connected | error
+  const reconnectTimeoutRef = useRef(null);
   const listenersRef = useRef({});
+  const mountedRef = useRef(true);
+
+  const [status, setStatus] = useState('disconnected');
 
   const on = useCallback((event, handler) => {
     listenersRef.current[event] = handler;
@@ -24,32 +28,47 @@ export function useWebSocket(userId) {
   }, []);
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (!userId || !mountedRef.current) return;
+
+    if (
+      wsRef.current?.readyState === WebSocket.OPEN ||
+      wsRef.current?.readyState === WebSocket.CONNECTING
+    ) {
+      return;
+    }
 
     setStatus('connecting');
-    const ws = new WebSocket(`${WS_URL}/ws?userId=${userId}`);
+
+    const ws = new WebSocket(
+      `${WS_URL}/ws?userId=${encodeURIComponent(userId)}`
+    );
 
     ws.onopen = () => {
+      if (!mountedRef.current) return;
       setStatus('connected');
     };
 
     ws.onclose = () => {
+      if (!mountedRef.current) return;
+
       setStatus('disconnected');
-      // Auto-reconnect after 3s
-      setTimeout(connect, 3000);
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connect();
+      }, RECONNECT_DELAY);
     };
 
     ws.onerror = () => {
+      if (!mountedRef.current) return;
       setStatus('error');
     };
 
     ws.onmessage = (event) => {
       try {
         const { type, payload } = JSON.parse(event.data);
-        const handler = listenersRef.current[type];
-        if (handler) handler(payload);
+        listenersRef.current[type]?.(payload);
       } catch (err) {
-        console.error('WS parse error:', err);
+        console.error('WebSocket parse error:', err);
       }
     };
 
@@ -57,11 +76,25 @@ export function useWebSocket(userId) {
   }, [userId]);
 
   useEffect(() => {
+    mountedRef.current = true;
+
     connect();
+
     return () => {
+      mountedRef.current = false;
+
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+
       wsRef.current?.close();
     };
   }, [connect]);
 
-  return { status, send, sendBinary, on };
+  return {
+    status,
+    send,
+    sendBinary,
+    on,
+  };
 }
